@@ -1,0 +1,6 @@
+venv/ 
+py cashe/
+*.pyc
+data/data
+models/
+ipynb_checkpoints/
