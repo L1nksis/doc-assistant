@@ -1,3 +1,10 @@
-Jupyter
-numpy
-pandas
+fastapi
+uvicorn
+pydantic
+sentence-transformers
+scikit-learn
+python-dotenv
+gigachat
+langgraph
+langchain-core
+langchain-gigachat

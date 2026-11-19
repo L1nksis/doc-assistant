@@ -1,0 +1,11 @@
+services:
+  doc-assistant:
+    build: .
+    container_name: doc-assistant-web
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./hf_cache:/app/hf_cache
+    restart: unless-stopped

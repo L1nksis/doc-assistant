@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Doc Assistant — RAG & ИИ-Агенты</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; display: flex; flex-direction: column; height: 100vh; }
+        header { background: #1e293b; padding: 15px 25px; border-bottom: 1px solid #334155; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
+        header h1 { margin: 0; font-size: 1.2rem; color: #38bdf8; }
+        .controls { display: flex; gap: 10px; align-items: center; }
+        select, button { padding: 8px 14px; border-radius: 8px; border: 1px solid #475569; background: #0f172a; color: #f8fafc; font-size: 0.9rem; cursor: pointer; }
+        button.primary { background: #2563eb; border-color: #2563eb; font-weight: 600; }
+        button.primary:hover { background: #1d4ed8; }
+        button.preset { background: #1e293b; font-size: 0.8rem; }
+        button.preset:hover { border-color: #38bdf8; }
+        .presets { padding: 10px 25px; background: #162032; display: flex; gap: 8px; flex-wrap: wrap; border-bottom: 1px solid #334155; }
+        #chat { flex: 1; overflow-y: auto; padding: 20px 25px; display: flex; flex-direction: column; gap: 15px; }
+        .msg { max-width: 80%; padding: 14px 18px; border-radius: 12px; line-height: 1.5; white-space: pre-wrap; }
+        .user { align-self: flex-end; background: #2563eb; color: #fff; }
+        .bot { align-self: flex-start; background: #1e293b; border: 1px solid #334155; }
+        .logs { margin-top: 10px; padding: 10px; background: #0b1120; border-radius: 8px; font-family: monospace; font-size: 0.82rem; color: #94a3b8; border-left: 3px solid #38bdf8; }
+        footer { padding: 15px 25px; background: #1e293b; border-top: 1px solid #334155; display: flex; gap: 10px; }
+        input { flex: 1; padding: 12px 15px; border-radius: 8px; border: 1px solid #475569; background: #0f172a; color: #fff; font-size: 1rem; }
+        input:focus { outline: none; border-color: #38bdf8; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>🤖 Doc Assistant (BERT RAG + PyTorch + GigaChat)</h1>
+        <div class="controls">
+            <label for="mode">Режим:</label>
+            <select id="mode">
+                <option value="langgraph">⚙️ Агент: LangGraph (Фреймворк)</option>
+                <option value="native">🚀 Агент: Native Tool Calling</option>
+                <option value="json">🧩 Агент: JSON-подход</option>
+                <option value="rag">🔍 Только RAG-поиск (BERT)</option>
+            </select>
+        </div>
+    </header>
+
+    <div class="presets">
+        <button class="preset" onclick="setPreset('Как отменить заказ, если он еще не отправлен?')">Пример: RAG вопрос</button>
+        <button class="preset" onclick="setPreset('Клиент написал: I want to cancel my order and get a refund for 3 items at 1450 rubles each minus 350 rubles delivery fee. 1) Определи категорию, 2) Найди правила отмены заказа, 3) Посчитай сумму возврата.')">Пример: Составной запрос (3 инструмента)</button>
+        <button class="preset" onclick="setPreset('Посчитай (4500 * 2) - 1250 и найди в базе правила возврата денег')">Пример: Калькулятор + Поиск</button>
+    </div>
+
+    <div id="chat">
+        <div class="msg bot">Привет! Выберите режим работы вверху и задайте вопрос. В режимах агента я могу сам искать ответы в базе знаний, определять категорию обращения через PyTorch и считать суммы.</div>
+    </div>
+
+    <footer>
+        <input type="text" id="query" placeholder="Введите ваш запрос..." onkeydown="if(event.key==='Enter') send()">
+        <button class="primary" onclick="send()" id="sendBtn">Отправить</button>
+    </footer>
+
+    <script>
+        function setPreset(text) {
+            document.getElementById('query').value = text;
+        }
+
+        async function send() {
+            const input = document.getElementById('query');
+            const btn = document.getElementById('sendBtn');
+            const chat = document.getElementById('chat');
+            const mode = document.getElementById('mode').value;
+            const text = input.value.trim();
+            if (!text) return;
+
+            chat.innerHTML += `<div class="msg user">${text}</div>`;
+            input.value = '';
+            btn.disabled = true;
+            btn.innerText = 'Думаю...';
+            chat.scrollTop = chat.scrollHeight;
+
+            try {
+                const res = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ question: text, mode: mode, k: 3 })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || 'Ошибка сервера');
+
+                let logsHtml = '';
+                if (data.logs && data.logs.length > 0) {
+                    logsHtml = `<div class="logs"><b>Лог шагов агента:</b><br>${data.logs.join('<br>')}</div>`;
+                }
+                chat.innerHTML += `<div class="msg bot">${data.answer}${logsHtml}</div>`;
+            } catch (e) {
+                chat.innerHTML += `<div class="msg bot" style="color:#f87171">❌ Ошибка: ${e.message}</div>`;
+            } finally {
+                btn.disabled = false;
+                btn.innerText = 'Отправить';
+                chat.scrollTop = chat.scrollHeight;
+            }
+        }
+    </script>
+</body>
+</html>

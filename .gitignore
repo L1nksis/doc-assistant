@@ -1,6 +1,14 @@
-venv/ 
+
 py cashe/
 *.pyc
 data/data
 models/
 ipynb_checkpoints/
+.env
+notebooks/.env
+venv/
+hf_cache/
+*.csv
+*.pth
+*.pkl
+__pycache__/

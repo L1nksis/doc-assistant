@@ -21,7 +21,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 # ==================================================================
-# 1. ЗАГРУЗКА ЛОКАЛЬНЫХ ИИ-КОМПОНЕНТОВ (ВЕКТОРИЗАТОР И АГЕНТ)
+# 1. ЗАГРУЗКА ЛОКАЛЬНЫХ ИИ-КОМПОНЕНТОВ (ВЕКТОРИЗАТОР, КОДИРОВЩИК И АГЕНТ)
 # ==================================================================
 print("Загрузка компонентов ИИ-агента...")
 
@@ -32,17 +32,22 @@ try:
 except FileNotFoundError:
     raise FileNotFoundError("Ошибка: Не найден файл 'vectorizer.pkl'. Пожалуйста, перенесите его в эту папку.")
 
-EMOTION_MAP = {
-    0: "sadness (грусть) 😢",
-    1: "joy (радость) 😊",
-    2: "love (любовь) ❤️",
-    3: "anger (злость) 😡",
-    4: "fear (страх) 😨",
-    5: "surprise (удивление) 😲"
-}
+# Загружаем кодировщик классов (11 категорий поддержки)
+if os.path.exists('label_encoder.pkl'):
+    with open('label_encoder.pkl', 'rb') as f:
+        label_encoder = pickle.load(f)
+    CATEGORY_CLASSES = list(label_encoder.classes_)
+else:
+    # Резервный список классов в алфавитном порядке (как при обучении)
+    CATEGORY_CLASSES = [
+        "ACCOUNT", "CANCEL", "CONTACT", "DELIVERY", "FEEDBACK",
+        "INVOICE", "ORDER", "PAYMENT", "REFUND", "SHIPPING", "SUBSCRIPTION"
+    ]
+
+num_classes = len(CATEGORY_CLASSES)
 
 class AgentClassifierNetwork(nn.Module):
-    def __init__(self, input_dim, num_classes=6): 
+    def __init__(self, input_dim, num_classes=11): 
         super(AgentClassifierNetwork, self).__init__()
         self.branch_wide = nn.Sequential(
             nn.Linear(input_dim, 64),
@@ -64,13 +69,16 @@ class AgentClassifierNetwork(nn.Module):
         out = torch.cat((x1, x2), dim=1)
         return self.classifier(out)
 
-model = AgentClassifierNetwork(input_dim=input_features_count, num_classes=6).to(device)
 checkpoint_path = 'model_lora_finetuned.pth'
 if not os.path.exists(checkpoint_path):
     checkpoint_path = 'model_checkpoint.pth'
 
 try:
     checkpoint = torch.load(checkpoint_path, map_location=device)
+    # Если в чекпоинте сохранено количество классов, используем его
+    saved_num_classes = checkpoint.get('num_classes', num_classes)
+    model = AgentClassifierNetwork(input_dim=input_features_count, num_classes=saved_num_classes).to(device)
+    
     state_dict = checkpoint['model_state_dict']
     cleaned_state_dict = {}
     for k, v in state_dict.items():
@@ -78,7 +86,7 @@ try:
         cleaned_state_dict[name] = v
     model.load_state_dict(cleaned_state_dict, strict=False)
     model.eval()
-    print(f"✅ Веса агента успешно загружены из '{checkpoint_path}'!")
+    print(f"✅ Веса агента успешно загружены из '{checkpoint_path}' (классов: {saved_num_classes})!")
 except FileNotFoundError:
     raise FileNotFoundError("Ошибка: Не найдены чекпоинты модели. Сначала обучите модель.")
 
@@ -87,11 +95,11 @@ except FileNotFoundError:
 # 2. НАСТРОЙКА ИНСТРУКЦИЙ И ПРЕДОБРАБОТКИ
 # ==================================================================
 system_instruction = (
-    "Роль: Ты эмпатичный ИИ-ассистент и эксперт по эмоциональному интеллекту.\n"
-    "Контекст: Пользователь ввел фразу на английском языке, а локальный классификатор ИИ определил её эмоцию.\n"
-    "Инструкция: Проанализируй фразу пользователя и выданный вердикт. Напиши краткий, "
-    "но развернутый ответ на русском языке: поддержи пользователя, если эмоция негативная, "
-    "или порадуйся за него, если позитивная. Дай один уместный жизненный совет или комментарий по ситуации.\n"
+    "Роль: Ты профессиональный ИИ-ассистент службы клиентской поддержки.\n"
+    "Контекст: Клиент написал обращение на английском языке, а локальный классификатор ИИ определил категорию его обращения.\n"
+    "Инструкция: Проанализируй обращение клиента и определенную категорию. Напиши вежливый, "
+    "четкий и полезный ответ на русском языке: подтверди, что вопрос принят в работу по указанной категории, "
+    "и предложи понятные дальнейшие шаги или решение.\n"
     "Формат: Отвечай дружелюбно, структурированно, без использования программных логов."
 )
 
@@ -107,8 +115,8 @@ def clean_text(text):
 # ==================================================================
 # 3. ИНТЕРАКТИВНЫЙ КОНСОЛЬНЫЙ ЦИКЛ ОПРОСА
 # ==================================================================
-print("\n=== Консольный интерфейс ИИ-агента запущен ===")
-print("Введите вашу фразу на английском языке.")
+print("\n=== Консольный интерфейс ИИ-агента поддержки запущен ===")
+print("Введите обращение клиента на английском языке.")
 print("Для выхода введите 'выход' или 'exit'.\n")
 
 # Используем контекстный менеджер 'with' для стабильности сессии GigaChat на Windows
@@ -131,7 +139,7 @@ with GigaChat(
         # 1. Локальная предобработка текста
         cleaned_text_sample = clean_text(user_input)
         if len(cleaned_text_sample) < 10:
-            print("🤖 Агент: Фраза слишком короткая для надежного определения эмоции.")
+            print("🤖 Агент: Запрос слишком короткий для надежного определения категории.")
             print("-" * 50)
             continue
 
@@ -144,14 +152,18 @@ with GigaChat(
             _, predicted_class = torch.max(outputs, 1)
             predicted_idx = predicted_class.item()
         
-        detected_emotion = EMOTION_MAP.get(predicted_idx, 'Неизвестная эмоция')
-        print(f"🧠 [Локальный агент определил класс]: {detected_emotion}")
+        detected_category = (
+            CATEGORY_CLASSES[predicted_idx]
+            if 0 <= predicted_idx < len(CATEGORY_CLASSES)
+            else "Неизвестная категория"
+        )
+        print(f"🧠 [Локальный агент определил категорию]: {detected_category}")
 
         # 3. Формирование запроса по вашему SDK-шаблону
         giga_prompt = (
-            f"Фраза пользователя: \"{user_input}\"\n"
-            f"Определенная локальным агентом эмоция: {detected_emotion}\n"
-            f"Сформулируй свой финальный ответ-комментарий."
+            f"Обращение клиента: \"{user_input}\"\n"
+            f"Определенная локальным агентом категория: {detected_category}\n"
+            f"Сформулируй свой финальный ответ клиенту."
         )
         
         chat_request = Chat(
